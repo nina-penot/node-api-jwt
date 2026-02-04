@@ -24,14 +24,50 @@ const users = [];
 
 // Middleware pour parser le JSON
 app.use(express.json());
-
+//cors
 app.use(cors());
 
+//UTILS FUNCTIONS
+
+/**
+ * 
+ * @param {*} body the main req.body
+ * @param {*} mode Whether to use "todos" or "users"
+ * @returns 
+ */
+function check_for_body(body, mode) {
+    let result = {
+        error: false,
+        err_message: "",
+        res_number: 0,
+    };
+
+    if (!body || body === undefined) {
+        result.error = true;
+        result.err_message = "No body found...";
+        result.res_number = 400;
+        return result;
+    }
+
+    if (mode == "todos") {
+
+    }
+
+    if (mode == "users") {
+
+    }
+
+    return result;
+}
+
+//ROUTES
+
+//HOME
 app.get("/", (req, res) => {
-
     res.send("<h1>Bienvenue sur l'API</h1>");
-})
+});
 
+//ALL
 app.get("/api/seeall", async (req, res) => {
     try {
         const sql_todos = "SELECT * FROM todos";
@@ -49,9 +85,9 @@ app.get("/api/seeall", async (req, res) => {
         console.log(err);
         res.json({ error: err });
     }
+});
 
-})
-
+// DB_TODOS
 app.get("/api/todos", async (req, res) => {
     try {
         const sql = "SELECT * FROM todos";
@@ -60,7 +96,25 @@ app.get("/api/todos", async (req, res) => {
     } catch (err) {
         console.log(err);
     }
+});
 
+app.post('api/todos/:id', async (req, res) => {
+    try {
+        const sql = "INSERT INTO `todos`(`text`, `completed`) VALUES (?, ?)";
+        if (!req.body) {
+            return res.status(400).json({ message: "No body found..." })
+        }
+
+        if (!req.body.text || req.body.completed === undefined) {
+            return res.status(400).json({ message: "Champs invalides." })
+        }
+
+        const values = [req.body.text, req.body.completed];
+        const [result, fields] = await connection.execute(sql, values);
+        console.log("POST in TODOS done!");
+    } catch (err) {
+        console.log(err);
+    }
 
 })
 

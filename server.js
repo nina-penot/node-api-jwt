@@ -1,10 +1,20 @@
 import express from "express";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
+import cors from "cors";
 import "dotenv/config";
+import mysql from 'mysql2/promise';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+
+// Create the connection to database
+const connection = await mysql.createConnection({
+    host: process.env.HOST,
+    user: process.env.DB_USER,
+    database: process.env.DB_NAME,
+    password: process.env.DB_PASS
+});
 
 // Clé secrète pour signer les tokens JWT
 const SECRET_KEY = "ma_cle_secrete_super_longue_123";
@@ -15,14 +25,61 @@ const users = [];
 // Middleware pour parser le JSON
 app.use(express.json());
 
+app.use(cors());
+
+app.get("/", (req, res) => {
+
+    res.send("<h1>Bienvenue sur l'API</h1>");
+})
+
+app.get("/api/seeall", async (req, res) => {
+    try {
+        const sql_todos = "SELECT * FROM todos";
+        const [todo_result, todo_fields] = await connection.query(sql_todos);
+        const sql_users = "SELECT * FROM users";
+        const [users_result, users_fields] = await connection.query(sql_users);
+        res.json({
+            results: {
+                todos: todo_result,
+                users: users_result
+            }
+        });
+        console.log("response SEEALL OK");
+    } catch (err) {
+        console.log(err);
+        res.json({ error: err });
+    }
+
+})
+
+app.get("/api/todos", async (req, res) => {
+    try {
+        const sql = "SELECT * FROM todos";
+        const [result, fields] = await connection.query(sql);;
+        res.json({ results: result });
+    } catch (err) {
+        console.log(err);
+    }
+
+
+})
+
 // ========================
 // POST /api/register
 // ========================
 app.post("/api/register", async (req, res) => {
+
+    //check if req.body exists, sends error if not.
+    if (!req.body) {
+        console.log("POST attempted but no body found.");
+        return res.status(400).json({ message: "No body found." });
+    }
+
     const { email, password } = req.body;
 
     // Vérifier que les champs sont remplis
     if (!email || !password) {
+        console.log("POST attempted but no email or password found");
         return res.status(400).json({ message: "Email et mot de passe requis" });
     }
 
@@ -51,6 +108,7 @@ app.post("/api/login", async (req, res) => {
     // Chercher l'utilisateur
     const user = users.find((u) => u.email === email);
     if (!user) {
+        console.log(users);
         return res.status(401).json({ message: "Email ou mot de passe incorrect" });
     }
 
@@ -77,8 +135,11 @@ app.post("/api/login", async (req, res) => {
 // Middleware d'authentification
 // ========================
 function authenticateToken(req, res, next) {
+    // next est pour passer au middleware suivant
     // Récupérer le header Authorization: "Bearer <token>"
     const authHeader = req.headers.authorization;
+    // Avoid errors with .split() if authHeader empty (first get authHeader
+    // THEN split)
     const token = authHeader && authHeader.split(" ")[1];
 
     if (!token) {

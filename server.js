@@ -9,12 +9,14 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Create the connection to database
+
 const connection = await mysql.createConnection({
     host: process.env.HOST,
     user: process.env.DB_USER,
     database: process.env.DB_NAME,
     password: process.env.DB_PASS
 });
+
 
 // Clé secrète pour signer les tokens JWT
 const SECRET_KEY = "ma_cle_secrete_super_longue_123";
@@ -32,10 +34,11 @@ app.use(cors());
 /**
  * 
  * @param {*} body the main req.body
- * @param {*} mode Whether to use "todos" or "users"
+ * @param {*} mode MODES: "todos": verify everything about todos, "users":
+ * verify everything about users, null: do not verify anything except if body exists
  * @returns 
  */
-function check_for_body(body, mode) {
+function check_for_body(body, mode = null) {
     let result = {
         error: false,
         err_message: "",
@@ -50,17 +53,39 @@ function check_for_body(body, mode) {
     }
 
     if (mode == "todos") {
-
+        if (!body.text || body.completed === undefined) {
+            result.error = true;
+            result.err_message = "TODOS error: invalid completed or text";
+            result.res_number = 400;
+            return result;
+        }
     }
 
     if (mode == "users") {
-
+        if (!body.email || !body.password || !body.name) {
+            result.error = true;
+            result.err_message = "USERS error: invalid email,pass or name.";
+            result.res_number = 400;
+            return result;
+        }
     }
 
     return result;
 }
 
 //ROUTES
+// app.get("/api/test", async (req, res) => {
+//     try {
+//         const sql = "SELECT * FROM todos_old";
+//         const [results] = await connection.query(sql);
+//         res.json({
+//             results: results
+//         });
+//     } catch (err) {
+//         console.log(err);
+//         return res.status(400).json({ message: "TEST ERR" });
+//     }
+// });
 
 //HOME
 app.get("/", (req, res) => {
@@ -98,7 +123,7 @@ app.get("/api/todos", async (req, res) => {
     }
 });
 
-app.post('api/todos/:id', async (req, res) => {
+app.post('/api/todos/:id', async (req, res) => {
     try {
         const sql = "INSERT INTO `todos`(`text`, `completed`) VALUES (?, ?)";
         if (!req.body) {
@@ -118,6 +143,19 @@ app.post('api/todos/:id', async (req, res) => {
 
 })
 
+// DB USERS
+app.get("/api/users", async (req, res) => {
+    try {
+        const sql = "SELECT * FROM users";
+        const [results] = await connection.query(sql);
+        res.json({ results: results });
+        console.log("get users ok");
+    } catch (err) {
+        console.log(err);
+        return res.status(400).json({ message: "GET err, can't get users." });
+    }
+});
+
 // ========================
 // POST /api/register
 // ========================
@@ -129,26 +167,31 @@ app.post("/api/register", async (req, res) => {
         return res.status(400).json({ message: "No body found." });
     }
 
-    const { email, password } = req.body;
+    //const { email, password, name } = req.body;
 
     // Vérifier que les champs sont remplis
-    if (!email || !password) {
+    if (!req.body.email || !req.body.password || !req.body.name) {
         console.log("POST attempted but no email or password found");
-        return res.status(400).json({ message: "Email et mot de passe requis" });
+        return res.status(400).json({ message: "Email, nom et mot de passe requis" });
     }
 
     // Vérifier si l'utilisateur existe déjà
-    const existingUser = users.find((u) => u.email === email);
-    if (existingUser) {
+    const sql = "SELECT * FROM users WHERE email = ?";
+    const [existingUser, fields] = await connection.execute(sql, [req.body.email]);
+
+    if (existingUser.length) {
         return res.status(409).json({ message: "Cet email est déjà utilisé" });
     }
 
     // Hasher le mot de passe avec bcrypt
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const hashedPassword = await bcrypt.hash(req.body.password, 10);
 
     // Stocker l'utilisateur
-    const newUser = { id: users.length + 1, email, password: hashedPassword };
-    users.push(newUser);
+    const sql_reg = "INSERT INTO users (email, password, name) VALUES (?, ?, ?)";
+    const values_reg = [req.body.email, hashedPassword, req.body.name];
+    const newUser = await connection.execute(sql_reg, values_reg);
+    //const newUser = { id: users.length + 1, email, password: hashedPassword };
+    //users.push(newUser);
 
     res.status(201).json({ message: "Utilisateur créé", user: { id: newUser.id, email: newUser.email } });
 });
@@ -157,10 +200,19 @@ app.post("/api/register", async (req, res) => {
 // POST /api/login
 // ========================
 app.post("/api/login", async (req, res) => {
+    let checker = check_for_body(req.body, "users");
+    if (checker.error) {
+        console.log("LOGIN attempted,", checker.message);
+        return res.status(checker.res_number).json({ message: checker.message });
+    }
+
     const { email, password } = req.body;
 
     // Chercher l'utilisateur
-    const user = users.find((u) => u.email === email);
+    const sql = "SELECT * FROM users WHERE email = ?";
+    const [user, userfield] = await connection.execute(sql, [email]);
+
+    //const user = users.find((u) => u.email === email);
     if (!user) {
         console.log(users);
         return res.status(401).json({ message: "Email ou mot de passe incorrect" });
@@ -182,7 +234,32 @@ app.post("/api/login", async (req, res) => {
         { expiresIn: "1h" }                    // options : expire dans 1 heure
     );
 
-    res.json({ message: "Connexion réussie", token });
+    res.json({
+        message: "Connexion réussie",
+        userinfo: { email: user.email, name: user.name },
+        token
+    });
+});
+
+app.get("/api/login", async (req, res) => {
+    try {
+        let checker = check_for_body(req.body);
+        if (checker.error) {
+            console.log(checker.err_message);
+            res.status(checker.res_number).json({ message: checker.err_message });
+        }
+        const sql = "SELECT * FROM users WHERE email = ?";
+        const [results] = await connection.query(sql, [req.email]);
+        if (req.body.email == "") {
+            res.json({ message: "Nobody logged in..." });
+        } else {
+            res.json({ result: results });
+        }
+
+
+    } catch (err) {
+        console.log(err);
+    }
 });
 
 // ========================
